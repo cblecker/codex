@@ -80,7 +80,120 @@ fn linked_worktree_discovery_rejects_mismatched_backlinks() {
     .expect("invalid worktree backlink");
 
     assert_eq!(repository_identity(&linked.join("nested")), None);
+    assert_eq!(linked_worktree_git_dirs(&linked), None);
     assert_eq!(linked_worktree_cwds(&primary_cwd), Some(vec![primary_cwd]));
+}
+
+#[test]
+fn linked_git_directories_accept_relative_pointers_and_spaces() {
+    let (_root, primary, linked) = repository_with_linked_checkout();
+    let original = primary.join(".git/worktrees/linked");
+    let admin = primary.join(".git/worktrees/linked with spaces");
+    fs::rename(original, &admin).unwrap();
+    fs::write(
+        linked.join(".git"),
+        "gitdir: ../primary/.git/worktrees/linked with spaces\n",
+    )
+    .unwrap();
+    let expected = LinkedWorktreeGitDirs {
+        git_dir: AbsolutePathBuf::from_absolute_path(admin)
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        common_dir: AbsolutePathBuf::from_absolute_path(primary.join(".git"))
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+    };
+    assert_eq!(
+        linked_worktree_git_dirs(&linked.join("nested")),
+        Some(expected)
+    );
+    assert_eq!(linked_worktree_git_dirs(&primary), None);
+}
+
+#[test]
+fn linked_git_directories_reject_invalid_metadata() {
+    for contents in [
+        "",
+        "gitdir:",
+        "not git",
+        "gitdir: /missing\nextra",
+        &"x".repeat(65_537),
+    ] {
+        let (_root, _primary, linked) = repository_with_linked_checkout();
+        fs::write(linked.join(".git"), contents).unwrap();
+        assert_eq!(linked_worktree_git_dirs(&linked), None);
+    }
+    let (_root, primary, linked) = repository_with_linked_checkout();
+    fs::write(
+        primary.join(".git/worktrees/linked/commondir"),
+        "../../..\n",
+    )
+    .unwrap();
+    assert_eq!(linked_worktree_git_dirs(&linked), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn linked_git_directories_reject_symlinked_registration_and_metadata() {
+    for relative in [
+        ".git",
+        ".git/worktrees",
+        ".git/worktrees/linked",
+        ".git/worktrees/linked/commondir",
+        ".git/worktrees/linked/gitdir",
+    ] {
+        let (root, primary, linked) = repository_with_linked_checkout();
+        let original = primary.join(relative);
+        let outside = root.path().join("outside");
+        fs::rename(&original, &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &original).unwrap();
+        assert_eq!(linked_worktree_git_dirs(&linked), None, "{relative}");
+    }
+    let (root, _primary, linked) = repository_with_linked_checkout();
+    let dot_git = linked.join(".git");
+    let outside = root.path().join("pointer");
+    fs::rename(&dot_git, &outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &dot_git).unwrap();
+    assert_eq!(linked_worktree_git_dirs(&linked), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn linked_git_directories_reject_symlink_parent_traversal() {
+    let (root, primary, linked) = repository_with_linked_checkout();
+    let outside = root.path().join("outside");
+    fs::create_dir_all(outside.join("nested")).unwrap();
+    fs::create_dir(outside.join("linked")).unwrap();
+    let alias = primary.join(".git/worktrees/alias");
+    std::os::unix::fs::symlink(outside.join("nested"), &alias).unwrap();
+    fs::write(
+        linked.join(".git"),
+        format!("gitdir: {}/../linked\n", alias.display()),
+    )
+    .unwrap();
+    assert_eq!(linked_worktree_git_dirs(&linked), None);
+}
+
+#[test]
+fn linked_git_directories_reject_multiline_pointer_fields() {
+    let (_root, primary, linked) = repository_with_linked_checkout();
+    let admin = primary.join(".git/worktrees/linked");
+    for contents in [
+        format!("gitdir: \n{}\n", admin.display()),
+        format!("\ngitdir: {}\n", admin.display()),
+    ] {
+        fs::write(linked.join(".git"), contents).unwrap();
+        assert_eq!(linked_worktree_git_dirs(&linked), None);
+    }
+    fs::write(
+        linked.join(".git"),
+        format!("gitdir: {}\n", admin.display()),
+    )
+    .unwrap();
+    fs::write(admin.join("commondir"), "\n../..\n").unwrap();
+    assert_eq!(linked_worktree_git_dirs(&linked), None);
 }
 
 #[cfg(unix)]

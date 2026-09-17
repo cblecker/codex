@@ -289,6 +289,10 @@ async fn run_command_under_sandbox(
         };
         permission_profile = PermissionProfile::from_runtime_permissions(&file_system, network);
     }
+    permission_profile = codex_sandboxing::with_worktree_git_write_permissions(
+        permission_profile,
+        sandbox_policy_cwd.as_path(),
+    );
     let use_legacy_landlock = sandbox_state.as_ref().map_or_else(
         || config.features.use_legacy_landlock(),
         |state| state.use_legacy_landlock,

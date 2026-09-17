@@ -52,6 +52,8 @@ pub use operations::git_config_override_env;
 pub use platform::create_symlink;
 pub use status::get_has_changes_in_repo;
 pub use trust::resolve_root_git_project_for_trust;
+pub use worktree::LinkedWorktreeGitDirs;
 pub use worktree::RepositoryIdentity;
 pub use worktree::linked_worktree_cwds;
+pub use worktree::linked_worktree_git_dirs;
 pub use worktree::repository_identity;

@@ -284,6 +284,48 @@ fn empty_catalog_permission_message_preserves_non_sandbox_sections() {
 }
 
 #[test]
+fn worktree_guidance_accompanies_writable_roots_with_bundled_or_catalog_messages() {
+    // Supplied paths can belong to a remote executor; rendering needs no Git metadata.
+    let writable_roots = vec![
+        "/remote/worktree".to_string(),
+        "/remote/worktree/.git".to_string(),
+    ];
+    for workspace_write in [None, Some("catalog workspace"), Some("")] {
+        let messages = PermissionMessages {
+            danger_full_access: None,
+            workspace_write: workspace_write.map(str::to_string),
+            read_only: None,
+        };
+        let approval_context = ApprovalPromptContext {
+            reviewer: ApprovalsReviewer::User,
+            messages: ResolvedApprovalMessages::new(/*messages*/ None),
+            permission_messages: ResolvedPermissionMessages::new(Some(&messages)),
+        };
+        for (sandbox_mode, roots) in [
+            (SandboxMode::WorkspaceWrite, writable_roots.as_slice()),
+            (SandboxMode::ReadOnly, &[][..]),
+            (SandboxMode::DangerFullAccess, &[][..]),
+        ] {
+            let text = PermissionsInstructions::from_resolved(
+                PermissionsRenderContext {
+                    sandbox_mode,
+                    writable_roots: roots,
+                    ..WORKSPACE_CONTEXT
+                },
+                approval_context,
+            )
+            .body();
+
+            assert_eq!(
+                text.matches(LINKED_WORKTREE_GIT_WRITES).count(),
+                usize::from(!roots.is_empty()),
+                "{sandbox_mode:?}, catalog text: {workspace_write:?}",
+            );
+        }
+    }
+}
+
+#[test]
 fn includes_request_rule_instructions_for_on_request() {
     let approved_command_prefixes = vec![vec!["git".to_string(), "pull".to_string()]];
     let text = PermissionsInstructions::from_resolved(
@@ -688,6 +730,7 @@ fn preserves_supplied_path_spellings_and_order() {
     );
     let expected_body = concat!(
         "\n The writable roots are `C:\\work\\z`, `/work/a`.\n",
+        "An explicit, effective write grant on a linked worktree's `.git` can also authorize writes to its validated Git directory and common Git directory, including locks and refs. The executor validates metadata and resolves this expansion at each launch, including remote execution. Restrictions or validation failures can limit or prevent expansion; workspace write access alone is insufficient. These derived grants may be absent from the writable-root list, so their omission alone does not mean Git locking or branch creation requires escalation.\n",
         "## Denied filesystem reads\n",
         "The active permission profile denies reading these paths/globs. Do not request escalation or additional permissions to read them; these denials are policy restrictions.\n",
         "- path `C:\\private`\n- path `/private`\n",

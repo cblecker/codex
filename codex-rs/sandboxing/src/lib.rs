@@ -12,6 +12,7 @@ mod violation;
 mod windows;
 #[cfg(windows)]
 mod windows_mxc;
+mod worktree_permissions;
 
 #[cfg(target_os = "linux")]
 pub use bwrap::find_system_bwrap_in_path;
@@ -51,6 +52,7 @@ pub use windows::resolve_windows_elevated_filesystem_overrides;
 pub use windows::resolve_windows_restricted_token_filesystem_overrides;
 pub use windows::unsupported_windows_restricted_token_sandbox_reason;
 pub use windows::windows_sandbox_uses_elevated_backend;
+pub use worktree_permissions::with_worktree_git_write_permissions;
 
 use codex_protocol::error::CodexErr;
 

@@ -25,6 +25,8 @@ use std::sync::LazyLock;
 
 const REQUEST_PERMISSION_RULE: &str =
     include_str!("../templates/permissions/approval_policy/on_request_rule_request_permission.md");
+const LINKED_WORKTREE_GIT_WRITES: &str =
+    include_str!("../templates/permissions/linked_worktree_git_writes.md");
 const REQUEST_PERMISSIONS_TOOL: &str = "# request_permissions Tool\n\nThe built-in `request_permissions` tool is available in this session. Invoke it when you need to request additional `network` or `file_system` permissions before later shell-like commands need them. Request only the specific permissions required for the task.";
 const AUTO_REVIEW_SUFFIX: &str = "`approvals_reviewer` is `auto_review`: Sandbox escalations with require_escalated will be reviewed for compliance with the policy. If a rejection happens, you should proceed only with a materially safer alternative, or inform the user of the risk and send a final message to ask for approval.";
 const APPROVED_PREFIXES: &str =
@@ -115,6 +117,9 @@ impl PermissionsInstructions {
         );
         if let Some(writable_roots) = writable_roots_text(context.writable_roots) {
             append_section(&mut text, &writable_roots);
+            // Keep this conditional behavior visible even with catalog sandbox text.
+            // Stable guidance avoids resolving executor-owned metadata into cached context.
+            append_section(&mut text, LINKED_WORKTREE_GIT_WRITES);
         }
         if let Some(denied_reads) =
             denied_reads_text(context.denied_read_paths, context.denied_read_globs)

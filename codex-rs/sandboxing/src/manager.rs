@@ -177,6 +177,10 @@ impl PendingSandboxedExecRequest {
             managed_mitm_ca_trust_bundle_path,
             native_sandbox_policy_cwd.as_path(),
         );
+        let effective_permission_profile = crate::with_worktree_git_write_permissions(
+            effective_permission_profile,
+            native_sandbox_policy_cwd.as_path(),
+        );
         Ok(Self {
             native_command_cwd,
             native_sandbox_policy_cwd,

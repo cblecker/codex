@@ -1,6 +1,8 @@
 mod common;
 #[path = "exec_process/windows_sandbox.rs"]
 mod windows_sandbox;
+#[path = "exec_process/worktree_permissions.rs"]
+mod worktree_permissions;
 
 use std::collections::HashMap;
 #[cfg(unix)]

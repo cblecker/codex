@@ -291,21 +291,21 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
         let filesystem_overrides = if use_elevated {
             resolve_windows_elevated_filesystem_overrides(
                 sandbox,
-                &permissions,
+                &request.permission_profile,
                 &native_sandbox_policy_cwd,
                 use_elevated,
             )
         } else {
             resolve_windows_restricted_token_filesystem_overrides(
                 sandbox,
-                &permissions,
+                &request.permission_profile,
                 &native_sandbox_policy_cwd,
                 windows_sandbox_level,
             )
         }
         .map_err(|err| invalid_params(format!("failed to prepare process sandbox: {err}")))?;
         Some(PreparedWindowsSandboxRequest {
-            permission_profile: permissions,
+            permission_profile: request.permission_profile,
             workspace_roots: native_workspace_roots,
             windows_sandbox_level,
             proxy_enforced,

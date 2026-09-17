@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -22,6 +23,21 @@ pub struct RepositoryIdentity {
     pub primary_root: AbsolutePathBuf,
 }
 
+/// Validated, canonical administrative directories for a linked worktree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedWorktreeGitDirs {
+    /// Worktree-specific index and administrative state.
+    pub git_dir: AbsolutePathBuf,
+    /// Shared objects, refs, and configuration.
+    pub common_dir: AbsolutePathBuf,
+}
+
+/// Resolves linked-worktree metadata on the host that owns the checkout.
+/// Ordinary repositories and unverified administrative links return `None`.
+pub fn linked_worktree_git_dirs(cwd: &Path) -> Option<LinkedWorktreeGitDirs> {
+    validated_repository(cwd)?.1
+}
+
 fn canonicalize_native(path: impl AsRef<Path>) -> Option<PathBuf> {
     AbsolutePathBuf::from_absolute_path(path)
         .ok()?
@@ -32,6 +48,10 @@ fn canonicalize_native(path: impl AsRef<Path>) -> Option<PathBuf> {
 
 /// Identifies a checkout without executing Git or trusting unchecked administrative links.
 pub fn repository_identity(cwd: &Path) -> Option<RepositoryIdentity> {
+    Some(validated_repository(cwd)?.0)
+}
+
+fn validated_repository(cwd: &Path) -> Option<(RepositoryIdentity, Option<LinkedWorktreeGitDirs>)> {
     let canonical_cwd = canonicalize_native(cwd)?;
     if !canonical_cwd.is_dir() {
         return None;
@@ -48,10 +68,11 @@ pub fn repository_identity(cwd: &Path) -> Option<RepositoryIdentity> {
         return None;
     }
 
+    let mut worktree_git_dir = None;
     let common_dir = if entry_type.is_dir() {
         canonicalize_native(&git_entry)?
     } else if entry_type.is_file() {
-        let git_dir = read_git_path(&git_entry, &checkout_root, "gitdir:")?;
+        let git_dir = read_git_path(&git_entry, &checkout_root, "gitdir: ")?;
         if !git_dir.is_dir() {
             return None;
         }
@@ -59,14 +80,17 @@ pub fn repository_identity(cwd: &Path) -> Option<RepositoryIdentity> {
         if !common_dir.is_dir() {
             return None;
         }
-        let registered_root = canonicalize_native(common_dir.join("worktrees"))?;
-        if git_dir.parent()? != registered_root {
+        let registered_root = common_dir.join("worktrees");
+        if canonicalize_native(&registered_root)? != registered_root
+            || git_dir.parent()? != registered_root
+        {
             return None;
         }
         let backlink = read_git_path(&git_dir.join("gitdir"), &git_dir, "")?;
         if backlink != canonicalize_native(&git_entry)? {
             return None;
         }
+        worktree_git_dir = Some(AbsolutePathBuf::from_absolute_path_checked(git_dir).ok()?);
         common_dir
     } else {
         return None;
@@ -82,11 +106,16 @@ pub fn repository_identity(cwd: &Path) -> Option<RepositoryIdentity> {
         return None;
     }
 
-    Some(RepositoryIdentity {
+    let identity = RepositoryIdentity {
         common_dir: AbsolutePathBuf::from_absolute_path_checked(common_dir).ok()?,
         relative_cwd,
         primary_root: AbsolutePathBuf::from_absolute_path_checked(primary_root).ok()?,
-    })
+    };
+    let git_dirs = worktree_git_dir.map(|git_dir| LinkedWorktreeGitDirs {
+        git_dir,
+        common_dir: identity.common_dir.clone(),
+    });
+    Some((identity, git_dirs))
 }
 
 /// Returns corresponding existing directories in the current, primary, and linked checkouts.
@@ -165,12 +194,35 @@ fn read_git_path(path: &Path, relative_to: &Path, prefix: &str) -> Option<PathBu
     if !fs::symlink_metadata(path).ok()?.file_type().is_file() {
         return None;
     }
-    let contents = fs::read_to_string(path).ok()?;
-    let value = contents.trim().strip_prefix(prefix)?.trim();
-    if value.is_empty() || value.contains('\n') || value.contains('\r') {
+    // Administrative pointer files should contain only one path. Bound allocation
+    // even if a file is replaced or grows after checking its metadata.
+    const MAX_METADATA_BYTES: u64 = 64 * 1024;
+    let file = fs::File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
         return None;
     }
-    canonicalize_native(relative_to.join(value))
+    let mut contents = String::new();
+    file.take(MAX_METADATA_BYTES + 1)
+        .read_to_string(&mut contents)
+        .ok()?;
+    if contents.len() as u64 > MAX_METADATA_BYTES {
+        return None;
+    }
+    let line = contents.strip_suffix('\n').unwrap_or(&contents);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    if line.contains(['\n', '\r']) {
+        return None;
+    }
+    let value = line.strip_prefix(prefix)?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let target = relative_to.join(value);
+    if fs::symlink_metadata(&target).ok()?.file_type().is_symlink() {
+        return None;
+    }
+    // Resolve on disk before normalizing: Git follows symlinks before `..`.
+    canonicalize_native(fs::canonicalize(target).ok()?)
 }
 
 #[cfg(test)]

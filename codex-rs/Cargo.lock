@@ -4475,6 +4475,7 @@ name = "codex-sandboxing"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "codex-git-utils",
  "codex-mxc-sandbox",
  "codex-network-proxy",
  "codex-otel",
